@@ -136,3 +136,157 @@ Once your project has been reviewed and accepted by meeting all requirements of 
 The competition agent can be submitted using the Udacity project assistant:
 
     udacity submit isolation-pvp
+
+# Heuristic Analysis
+__Frederick Chyan__
+
+Friday, July 21, 2017
+
+The purpose of this project is to find a heuristic that consistently outperforms AB_Improved, which is player's available moves minus opponent's available moves. The heuristic design iteration begins with selecting three custom heuristic functions. The first heuristic penalizes number of opponent's available moves. The second heuristic, rewards number of player's available moves. The third heuristic adds the center score to first heuristic, which is the Euclidean distance between player's position and the center of the board.
+Followings are the three preliminary heuristic.
+
+```
+h1 = own_moves - 2 * opp_moves
+h2 = 2 * own_moves - opp_moves
+h3 = own_center_score + (own_moves - 2 * opp_moves)
+```
+Below are the result.
+
+```
+                        *************************
+                             Playing Matches
+                        *************************
+
+ Match #   Opponent    AB_Improved     AB_h1        AB_h2        AB_h3
+                        Won | Lost   Won | Lost   Won | Lost   Won | Lost
+    1       Random       8  |   2     6  |   4     6  |   4    10  |   0
+    2       MM_Open      5  |   5     6  |   4     5  |   5     6  |   4
+    3      MM_Center     9  |   1     8  |   2     6  |   4     8  |   2
+    4     MM_Improved    6  |   4     6  |   4     6  |   4     7  |   3
+    5       AB_Open      6  |   4     4  |   6     4  |   6     5  |   5
+    6      AB_Center     6  |   4     4  |   6     7  |   3     6  |   4
+    7     AB_Improved    4  |   6     4  |   6     4  |   6     4  |   6
+--------------------------------------------------------------------------
+           Win Rate:      62.9%        54.3%        54.3%        65.7%
+```
+First, notice that AB\_h3 seem to perform better than the other two heuristic. However, it still does not outperform AB\_Improved. In fact, all three preliminary heuristics score the same against AB\_Imrpoved. This result, however, suggest one should further improve upon AB\_h3.
+Since h1 and h2 performs about the same, one wonder whether lowering the penalty to opponent's moves might make any difference as to not amplify prediction error.
+
+
+```
+h4 = own_center_score + (own_moves - 1.414 * opp_moves)
+                        *************************
+                             Playing Matches
+                        *************************
+
+ Match #   Opponent       AB_h4
+                        Won | Lost
+    1     AB_Improved   21  |  19
+--------------------------------------------------------------------------
+           Win Rate:      52.5%
+```
+
+This is better, however, it's only slightly above 50%. Looking at center score, it was arbitrarily added to the heuristic. There are some problems with this approach. First, it's a different measurement. Second, it does not even have a negative value like own\_moves - opp\_moves does. Is there a way to map both of them to a same scale and aggregate them? Well it's too much trouble to linearize both measurements at every search level, so it's better to look for an easier way. Here a new scaling factor called *distance boost* is introduced. It amplifies player's own moves by a factor proportional to the ratio of player's center score against opponent's center score. Intuitively, it *encourages movement that will place player further from the center than the opponent is*.
+
+```
+distance_boost = own_center_score / (opp_center_score + own_center_score)
+h5 = float((1+distance_boost) * own_moves - 1.414 * opp_moves)
+
+                        *************************
+                             Playing Matches
+                        *************************
+
+ Match #   Opponent    AB_Custom_3
+                        Won | Lost
+    1     AB_Improved   25  |  15
+--------------------------------------------------------------------------
+           Win Rate:      62.5%
+
+
+```
+The result indeed looks promising, play the game 800 times to ensure this heuristic indeed outperforms AB\_Improved consistently. The trials are parallelized by playing 20\*2=40 matches on 4 processor cores 5 times.
+
+```
+
+                        *************************
+                             Playing Matches
+                        *************************
+
+ Match #   Opponent     AB_Custom    AB_Custom    AB_Custom    AB_Custom
+                        Won | Lost   Won | Lost   Won | Lost   Won | Lost
+    1     AB_Improved   26  |  14    31  |   9    30  |  10    29  |  11
+--------------------------------------------------------------------------
+           Win Rate:      65.0%        77.5%        75.0%        72.5%
+
+
+ Match #   Opponent     AB_Custom    AB_Custom    AB_Custom    AB_Custom
+                        Won | Lost   Won | Lost   Won | Lost   Won | Lost
+    1     AB_Improved   25  |  15    23  |  17    26  |  14    23  |  17
+--------------------------------------------------------------------------
+           Win Rate:      62.5%        57.5%        65.0%        57.5%
+
+
+ Match #   Opponent     AB_Custom    AB_Custom    AB_Custom    AB_Custom
+                        Won | Lost   Won | Lost   Won | Lost   Won | Lost
+    1     AB_Improved   29  |  11    23  |  17    25  |  15    29  |  11
+--------------------------------------------------------------------------
+           Win Rate:      72.5%        57.5%        62.5%        72.5%
+
+
+ Match #   Opponent     AB_Custom    AB_Custom    AB_Custom    AB_Custom
+                        Won | Lost   Won | Lost   Won | Lost   Won | Lost
+    1     AB_Improved   29  |  11    27  |  13    25  |  15    26  |  14
+--------------------------------------------------------------------------
+           Win Rate:      72.5%        67.5%        62.5%        65.0%
+
+
+ Match #   Opponent     AB_Custom    AB_Custom    AB_Custom    AB_Custom
+                        Won | Lost   Won | Lost   Won | Lost   Won | Lost
+    1     AB_Improved   26  |  14    24  |  16    29  |  11    26  |  14
+--------------------------------------------------------------------------
+           Win Rate:      65.0%        60.0%        72.5%        65.0%
+```
+
+Here almost all matches are above 60%. Since the outcome is either win or loss, the result follows a binomial distribution (win with probability p). To test whether the agent can beat AB\_Improved with 60% certainty. Use a one-tailed test with null and alternative hypotheses.
+
+```
+H0: p ≤ 0.6
+H1: p > 0.6
+
+```
+
+The total number of winning trials is calculated by summing all won counters, which is 531. Then calculate the cumulative probability of winning at most 530 times, testing at threshold  α = 0.05. The p-value is 0.000116 which is less than α, the null hypothesis can be rejected.
+
+
+```
+26+31+30+29+25+23+26+23+29+23+25+29+29+27+25+26+26+24+29+26 = 531
+p-value = 1–BINOM.DIST(530, 800, 0.6, TRUE) = 0.000116736 < .05 = α
+```
+so the design iteration concludes with 95% confidence that the new heuristic shows a significant improvement over AB\_Improved.
+
+Summary
+==
+The best evaulation function is ```float((1+distance_boost) * own_moves - 1.414 * opp_moves)```. This is supported by three facts. Firstly, it beats AB\_Improve consistenly with at least 60% win rate (p-value < 0.05). Secondly, it is tuned from a prilimiary function that has very high win rate against random moves while the other two heuristics only won about half of the time aginst random, meaning the selected heuristic is guarded against random moves. Lastly, the first two other preliminary heuristics had lower win rates. 
+
+# Research Review
+*Frederick Chyan*
+
+July 23, 2017
+
+Selected Game Paper: [AlphaGo](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf) by the DeepMind Team.
+
+## Introduction
+Just like the game of Isolation, Go is also finite, deterministic, and perfect information. However, unlike Isolation, Go has much larger search space which makes designing an optimal value function by hand very difficult. The AlphaGo paper is selected to understand how state of the art AI tackles games that's previous thought impossible for a machine to beat expert human player. AlphaGo uses novel approaches to combine neural networks and Monte Carlo tree search to achieve this.
+
+## Techniques
+Policy function p(a|s) estimates the utility of selecting action a in game state s. Value function v(s) estimates the outcome of the game under perfect play by both players. The greater the value the better. AlphaGo first uses deep convolutional neural networks to estimate the policy and value network. Deep convolutional neural networks were used to in visual domains such as image classification and face recognitions, here it passes the board positions as 19 x 19 image, and use convolutional layers to construct a representation of the position. Next, it uses policy and value networks to carry out Monte Carlo tree search by evaluating the position using value network and sampling actions using policy network.
+
+### Policy Network and Value Network
+AlphaGo's training pipeline works as follows. First, a 13 layer network is trained from 30 million positions from the KGS Go Server, this is the Supervised Learning policy network p\_sigma, it has 55.7% accuracy and 3ms to select an action. Also trained is a fast rollout policy network which has lower accuracy of 24.2% but only 2us to select an action. Next a Reinforcement Learning policy network, p\_rho is trained by making it play against a randomly select previous iteration of the policy network. Finally, the value network v\_theta is trained from the self-play data from RL policy network regressing on (state, outcome) pair. The reason why the value network is trained this way rather than using available data of complete games is because of overfitting due to successive positions are strongly correlated.
+
+### Combining Neural Networks in Monte Carlo Tree Search (MCTS)
+Perhaps the most interesting and powerful technique in AlphaGo is using Monte Carlo tree search to improve the prediction. It simulates and sample matches by rolling out searches in state spaces. It is highly parallelizable, and can be stopped at any time to achieve a balance of speed and accuracy. It introduces a random element in selecting next action, and constantly updates the parameters in estimation function, effectively making the AI smarter continuously and asynchronously. At every edge of the tree, there is an action value Q(s, a), visit count N(s,a), and prior probability P(s,a). The prior probability is based on SL policy network p\_sigma.
+The MCTS is carried out in four steps. It first selects a node to expand, based on the bonus function u(s,a) which is proportional to the prior probability over the visit count. This ensures other actions will also be explored if this node gets expanded too much. When it reaches a leaf node at step L, it then expand the node and process it using SL policy network, now the output probability will be stored as the prior. Next, the leaf node will be evaluated using two different ways. 1. the value network v\_theta and 2. playing the game until termination using fast roll out policy network p\_pi. The resulting score are then weighted and summed together. Finally, the result will back propagate to the root node updating the visit count N, and action value Q. The AI then chooses the most visited node as the action to take.
+
+## Key Result
+Utilizing deep learning, Monte Carlo tree search, and reinforcement learning, AlphaGo studied and learned from professional players, then it evolves by playing and simulating countless number of games continuously, updating itself while the game in progress. Using just the value network, Alpha Go achieves a rating that places it in the Amateur dan. Also, it's also able to beat the strongest AI at the time by allowing 4 free moves. With Rollouts, Value Network and Policy network, AlphaGo can win >95% against other players. Meaning the search mechanism successfully combines the strong but impractical reinforcement learning policy network and weaker but faster rollout policy network. Winning several world champions AlphaGo achieved what was thought to be impossible previously. 
